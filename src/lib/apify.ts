@@ -1,36 +1,24 @@
 import type { BusinessResult, SearchParams } from "@/types";
+import { buildMapsActorInput, normalizePlaceItem } from "./place-adapter";
 
-const ACTOR_ID = (process.env.APIFY_ACTOR_ID || "compass/google-maps-scraper").replace("/", "~");
+const ACTOR_ID = (process.env.APIFY_ACTOR_ID || "johnvc/google-maps-places-api").replace("/", "~");
+
+function toPlaceResults(items: unknown): BusinessResult[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) =>
+      item && typeof item === "object"
+        ? normalizePlaceItem(item as Record<string, unknown>)
+        : null
+    )
+    .filter((item): item is BusinessResult => item != null);
+}
 
 export async function runApifyActor(
   apiKey: string,
   params: SearchParams
 ): Promise<BusinessResult[]> {
-  const isDineshsScraper = ACTOR_ID.includes("google-business-scraper");
-
-  const input = isDineshsScraper
-    ? {
-        businessType: params.subCategory
-          ? `${params.subCategory} ${params.typeOfBusiness}`
-          : params.typeOfBusiness,
-        location: params.location,
-        maxResults: params.maxResults,
-      }
-    : {
-        searchStringsArray: params.subCategory
-          ? [`${params.subCategory} ${params.typeOfBusiness}`]
-          : [params.typeOfBusiness],
-        locationQuery: params.location,
-        maxCrawledPlacesPerSearch: params.maxResults,
-        language: "en",
-        deeperCityScrape: false,
-        includeHistogram: false,
-        includeOpeningHours: true,
-        includePeopleAlsoSearch: false,
-        exportPlaceUrls: false,
-        additionalInfo: false,
-        scrapeDirectories: false,
-      };
+  const input = buildMapsActorInput(ACTOR_ID, params);
 
   // Start the actor run (using 2048MB memory to prevent Playwright timeouts)
   const runRes = await fetch(
@@ -81,12 +69,10 @@ export async function runApifyActor(
 
     if (datasetRes.ok) {
       const items = await datasetRes.json();
-      if (Array.isArray(items) && items.length > 0) {
-        results = items;
-        // Stop early if we have reached the requested maxResults
-        if (results.length >= params.maxResults) {
-          break;
-        }
+      results = toPlaceResults(items);
+      // Stop early if we have reached the requested maxResults
+      if (results.length >= params.maxResults) {
+        break;
       }
     }
 
@@ -121,7 +107,7 @@ export async function runApifyActor(
     );
     if (datasetRes.ok) {
       const items = await datasetRes.json();
-      results = Array.isArray(items) ? items : [];
+      results = toPlaceResults(items);
     }
   }
 
